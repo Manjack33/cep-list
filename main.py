@@ -41,124 +41,109 @@ kv = """
 
 Builder.load_string(kv)
 
-class ImageBtn(ButtonBehavior, AsyncImage):
-    def __init__(self, **kwargs):
-        super(ImageBtn, self).__init__(**kwargs)
 
-class OnlineData():
+class Beer:
+    name: str
+    image: str = 'https://beskydskypivovarek.cz/wp-content/uploads/2020/04/nase-piva.png'
+    desc: str
+    cep: bool
+    pet: bool
+    sklo: bool
+    keg: bool
+
+
+class OnlineData:
     def __init__(self, **kwargs):
         super(OnlineData, self).__init__(**kwargs)
         self.beers = []
+        self.beers_desc = []
+
         self.images = []
         self.links = []
 
-    def getBeerRow(self, string, start, beers):
-        startPos = int(string.find("<tr ", start))
-        endPos = int(string.find("</tr>", startPos))
+    @staticmethod
+    def get_mid_string(begin: str, end: str, source: str, start_position: int = 0, exclude_end: bool = True) -> tuple:
+        begin_position = int(source.find(begin, start_position)) + len(begin)
+        end_position = int(source.find(end, begin_position))
+        return source[begin_position:end_position if end != '' else None], end_position + (len(end) if exclude_end else 0)
 
-        beer = string[startPos:endPos]
-        self.getDraft(beer)
+    def split_beer(self, source: str) -> None:
+        if '●' in source:
+            beer = Beer()
+            beer.name, end_pos = self.get_mid_string(begin='', end='">', source=source)
 
-        return endPos + 5
+            current_position = 0
+            for i in range(4):
+                if int(source.find('<td align="center">', current_position)) != -1:
+                    tag_section, current_position = self.get_mid_string(begin='<td align="center">', end='</td>', source=source, start_position=current_position)
+                    if '●' in tag_section:
+                        self.add_tag(i, beer)
 
-    def getDraft(self, string):
-        var = '<td align="center">'
+            self.beers.append(beer)
 
-        startPos = int(string.find(var))
+    def add_tag(self, index: int, beer: Beer):
+        if index == 0:
+            beer.cep = True
+        elif index == 1:
+            beer.pet = True
+        elif index == 2:
+            beer.sklo = True
+        elif index == 3:
+            beer.keg = True
+        else:
+            pass
 
-        typer = string[startPos + int(len(var))]
+    def parse_html_data(self):
+        # with urllib.request.urlopen('https://www.beskydskypivovarek.cz') as response:
+        #     html = response.read().decode("utf-8")
 
-        if typer == '●':
-            self.getBeerName(string)
-            self.getBeerLink(string)
-        return
+        response = open('source.html', 'r', encoding='utf-8')
+        html = response.read()
 
-    def getBeerName(self, string):
-        startPos = int(string.find('title="'))
-        endPos = int(string.find('">', startPos))
+        table, end_position = self.get_mid_string(begin='<table ', end='</table>', source=html)
 
-        beer = string[startPos + 7:endPos]
-        bugPos = int(beer.find('-'))
-        if bugPos != -1:
-            beer = beer[0:bugPos - 1]
+        current_table_position = 0
 
-        self.beers.append(beer)
-        self.getImage(beer)
-        return
+        while int(table.find('<span title="', current_table_position)) != -1:
+            beer_section, current_table_position = self.get_mid_string(begin='<span title="', end='</tr>', source=table, start_position=current_table_position)
+            self.split_beer(beer_section)
 
-    def getBeerLink(self, string):
-        startPos = int(string.find('href="'))
-        endPos = int(string.find('" target', startPos))
+        self.parse_description_data(source=html)
 
-        link = string[startPos + 6:endPos]
+        for beer in self.beers:
+            for beer_desc in self.beers_desc:
+                if beer_desc.name in beer.name.upper():
+                    beer.desc = beer_desc.desc
+                    beer.image = beer_desc.image
+                    break
 
-        self.links.append('https://www.beskydskypivovarek.cz/' + link)
+    def parse_description_data(self, source: str) -> None:
+        current_source_position = 0
 
-        return
+        section_begin = '</div></div></div></div><div class="wrap mcb-wrap mcb-wrap'
+        while int(source.find('</div></div></div></div><div class="wrap mcb-wrap mcb-wrap', current_source_position)) != -1:
+            beer_section, current_source_position = self.get_mid_string(begin=section_begin, end=section_begin, source=source, start_position=current_source_position, exclude_end=False)
+            self.split_beer_description(beer_section=beer_section)
 
-    def getOnlineData(self):
-        with urllib.request.urlopen('https://www.beskydskypivovarek.cz') as response:
-            html = response.read().decode("utf-8")
-            beers = []
-            beerList = html[int(html.find('<div id="MR"')):int(html.find('<div id="MB"'))]
-            curPos = 0
+    def split_beer_description(self, beer_section: str) -> None:
+        begin = '<h3 class="themecolor">'
+        if begin in beer_section:
+            beer = Beer()
+            beer.name, _ = self.get_mid_string(begin=begin, end='</h3>', source=beer_section)
+            beer.name = beer.name[1:] if beer.name.startswith(' ') else beer.name
 
-            while int(beerList.find("<tr ", curPos)) != -1:
-                curPos = self.getBeerRow(beerList, curPos, beers)
+            beer.image, _ = self.get_mid_string(begin='src="', end='"', source=beer_section)
 
-        return
+            beer.desc, _ = self.get_mid_string(begin='<p>', end='', source=beer_section, exclude_end=False)
+            beer.desc = beer.desc.replace('<h5>', '').replace('<strong>', '').replace('<p>', '').replace('</h5>', '').replace('</strong>', '').replace('</p>', '').replace('<br />', '').replace('\n\n', '\n')
+            self.beers_desc.append(beer)
 
-    def getImage(self, name):
-        with urllib.request.urlopen('https://www.beskydskypivovarek.cz/nase-piva/') as response:
-            html = response.read().decode("utf-8")
-            startPos = int(html.find(name))
+    # def get_desc_by_name(self, name: str) -> str:
+    #     return str([beer.desc for beer in self.beers if beer.name == name])
 
-            var = html[startPos - 150:startPos - 25]
-            begPos = int(var.find("img src="))
-            fin = var[begPos + 9:int(len(var))]
-            self.images.append("https://www.beskydskypivovarek.cz" + fin)
-        return
+    def get_beer_by_image(self, name: str) -> Beer:
+        return [beer for beer in self.beers if beer.name == name][0]
 
-    def getName(self, link):
-        with urllib.request.urlopen(link) as response:
-            html = response.read().decode("utf-8")
-            startPos = int(html.find("<h1"))
-            endPos = int(html.find("</h1>"))
-
-            desc = html[startPos+4: endPos]
-        return desc
-
-    def getDescribe(self, link):
-        with urllib.request.urlopen(link) as response:
-            html = response.read().decode("utf-8")
-            startPos = int(html.find("Styl"))
-            endPos = int(html.find("</table>"))
-
-            desc = html[startPos: endPos-20]
-            num = desc.count('<a')
-
-
-            while num >= 1:
-                desc = desc.replace((desc[int(desc.find('<a')): int(desc.find('/a>'))+3]),"")
-                num -= 1
-                print(num)
-
-            desc = desc.replace('<div style="text-align: justify;">', "")
-            desc = desc.replace('<!--<tr><td valign="top">Popis:</td><td><div class="pivpopis">', ' \nPopis:\n')
-            desc = desc.replace("</td><td>", " ")
-            desc = desc.replace("</td></tr>", "\n")
-            desc = desc.replace("<tr><td>", "")
-            desc = desc.replace("&nbsp; ", "")
-            desc = desc.replace("		", "")
-            desc = desc.replace("&#160;"," ")
-            desc = desc.replace(" ()","")
-            desc = desc.replace("<br />", "\n")
-            desc = desc.replace("  ", " ")
-            desc = desc.replace("</t", "")
-            desc = desc.replace("<div>", "")
-            desc = desc.replace("</div>", "")
-            desc = desc.replace("\n ", "\n")
-        return desc
 
 class WrapLabel(Label):
     """
@@ -174,18 +159,18 @@ class WrapLabel(Label):
         super(WrapLabel, self).__init__(**kwargs)
         self.size_hint = (None, None)
         if 'width' not in kwargs:
-            self.width=sp(100)
+            self.width = sp(100)
         if 'height' not in kwargs:
-            self.height=sp(18)
+            self.height = sp(18)
 
         if self.wrap:
-            #Constrain horizontally to size of label and free vertically
+            # Constrain horizontally to size of label and free vertically
             self.text_size = (self.width, None)
         else:
             self.text_size = self.size
             self.shorten = True
 
-    def on_texture_size(self,*args):
+    def on_texture_size(self, *args):
         Logger.debug('WrapLabel:on_texture_size [%s] texture_size %r size %r text_size %r',
                      self.text[0:5], self.texture_size, self.size, self.text_size)
         if self.wrap:
@@ -193,38 +178,43 @@ class WrapLabel(Label):
             self.height = self.texture_size[1]
 
 
+class ImageBtn(ButtonBehavior, AsyncImage):
+    def __init__(self, **kwargs):
+        super(ImageBtn, self).__init__(**kwargs)
+
+
 class Test(BoxLayout):
     def __init__(self, *args, **kwargs):
         super(Test, self).__init__(*args, **kwargs)
-        self.dat = OnlineData()
-        self.dat.getOnlineData()
+        self.data = OnlineData()
+        self.data.parse_html_data()
         self.callback()
 
     def callback(self):
         def update_height(img, *args):
             img.height = img.width / img.image_ratio
-        for i in range(len(self.dat.beers)):
-            image = ImageBtn(source=self.dat.images[i],
+        for beer in self.data.beers:
+            image = ImageBtn(source=beer.image,
                              size_hint=(1, None),
-                             id=self.dat.links[i],
                              keep_ratio=True,
                              allow_stretch=True,
-                             on_press=self.popUp)
+                             on_press=self.pop_up)
             image.bind(width=update_height, image_ratio=update_height)
             self.ids.wall.add_widget(image)
 
-    def popUp(self, instance):
-        name = instance.id
-        dat = OnlineData()
+    def pop_up(self, instance):
+        # TODO: popup doesn't work
+        beer = self.data.get_beer_by_image(name=instance.source)
 
-        show = WrapLabel(text=dat.getDescribe(name),
+        show = WrapLabel(text=beer.desc,
                          width=self.parent.width/1.5,
                          height=self.parent.height,
                          pos_hint={'center_x': 1, 'top': 1},
-                         text_size= self.size)
+                         text_size=self.size)
 
-        popWindow = Popup(title=dat.getName(name), content=show, size_hint = (0.85, 0.95), pos_hint={'center_x': 0.5, 'top': 0.95},)
-        popWindow.open()
+        pop_window = Popup(title=beer.name, content=show, size_hint=(0.85, 0.95), pos_hint={'center_x': 0.5, 'top': 0.95})
+        pop_window.open()
+
 
 class TestApp(App):
     def build(self):
